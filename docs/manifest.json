@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Steamprice",
+  "version": "1.0.0",
+  "description": "Skinpock inventory viewer with price history",
+  "permissions": ["storage", "unlimitedStorage", "cookies", "tabs", "scripting", "alarms"],
+  "host_permissions": [
+    "https://www.skinpock.com/*",
+    "https://steamcommunity.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "index.html"
+  }
+}

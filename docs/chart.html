@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Price History</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 1.5rem; }
+    h2 { color: #00d4ff; font-size: 1rem; margin-bottom: 0.4rem; word-break: break-all; }
+    p#subtitle { color: #888; font-size: 0.8rem; margin-bottom: 1.2rem; }
+    canvas { display: block; width: 100%; }
+    .legend { display: flex; gap: 1.5rem; margin-top: 0.8rem; font-size: 0.8rem; }
+    .legend span { display: flex; align-items: center; gap: 0.4rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    #no-data { color: #888; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <h2 id="title">—</h2>
+  <p id="subtitle"></p>
+  <canvas id="chart" height="300"></canvas>
+  <div class="legend">
+    <span><i class="dot" style="background:#00d4ff"></i> Steam</span>
+    <span><i class="dot" style="background:#f4a261"></i> Markets</span>
+  </div>
+  <p id="no-data" hidden>No history recorded yet. Load the inventory at least once.</p>
+
+  <script src="skinpock.js"></script>
+  <script src="chart.js"></script>
+</body>
+</html>

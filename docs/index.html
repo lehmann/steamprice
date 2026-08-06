@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Steamprice</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 1.5rem; min-width: 780px; }
+    h1 { color: #00d4ff; margin-bottom: 1.2rem; font-size: 1.2rem; letter-spacing: 1px; }
+
+    button { background: #00d4ff; color: #000; border: none; padding: 0.4rem 1rem;
+             cursor: pointer; font-family: monospace; font-size: 0.9rem; font-weight: bold; }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    #login-section { margin-bottom: 1rem; }
+    #inventory-section { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+    #steamid-display { color: #00d4ff; font-size: 0.9rem; }
+
+    #summary { margin-bottom: 0.75rem; color: #aaa; font-size: 0.85rem; min-height: 1.2rem; }
+    #status  { margin-bottom: 0.75rem; color: #ff6b6b; font-size: 0.85rem; min-height: 1.2rem; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    th { color: #00d4ff; border-bottom: 1px solid #00d4ff; padding: 0.3rem 0.5rem; text-align: left; white-space: nowrap; }
+    th.num, td.num { text-align: right; }
+    td { padding: 0.25rem 0.5rem; border-bottom: 1px solid #1f2a4a; }
+    tr:hover td { background: #0f2040; }
+    .price-cell { white-space: nowrap; }
+    .chart-btn { background: none; border: 1px solid #00d4ff44; color: #00d4ff; padding: 0 4px;
+                 cursor: pointer; font-size: 0.7rem; margin-left: 4px; line-height: 1.4;
+                 vertical-align: middle; font-family: monospace; }
+    .chart-btn:hover { background: #00d4ff22; }
+
+    .col-name { width: 100%; }
+    .col-num  { white-space: nowrap; padding-left: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Steamprice</h1>
+
+  <div id="login-section">
+    <button id="btn-login">Login with Steam</button>
+  </div>
+
+  <div id="inventory-section" hidden>
+    <span id="steamid-display"></span>
+    <button id="btn-load">Load Inventory</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="summary"></div>
+
+  <table id="table" hidden>
+    <thead>
+      <tr>
+        <th class="col-name">Item</th>
+        <th class="col-num num">Qty</th>
+        <th class="col-num num">Steam $</th>
+        <th class="col-num num">Markets $</th>
+        <th class="col-num num">Total Steam</th>
+        <th class="col-num num">Total Markets</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <script src="skinpock.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
