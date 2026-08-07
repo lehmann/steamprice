@@ -17,13 +17,26 @@ function chartBtn(itemName) {
   return btn;
 }
 
+function totalChartBtn() {
+  const btn = document.createElement('button');
+  btn.className = 'chart-btn';
+  btn.title = 'Total inventory value history';
+  btn.textContent = '↗';
+  btn.addEventListener('click', () => {
+    const url = chrome.runtime.getURL('chart.html?item=__total__');
+    chrome.tabs.create({ url });
+  });
+  return btn;
+}
+
 function renderTable(items) {
   const totalSteam  = items.reduce((s, g) => s + (g.priceSteam  ?? 0) * g.count, 0);
   const totalMarket = items.reduce((s, g) => s + (g.priceMarket ?? 0) * g.count, 0);
   const itemCount   = items.reduce((s, g) => s + g.count, 0);
 
-  $('summary').textContent =
-    `${itemCount} items  ·  Steam: ${fmt(totalSteam)}  ·  Markets: ${fmt(totalMarket)}`;
+  const summary = $('summary');
+  summary.textContent = `${itemCount} items  ·  Steam: ${fmt(totalSteam)}  ·  Markets: ${fmt(totalMarket)}  `;
+  summary.appendChild(totalChartBtn());
 
   const tbody = $('tbody');
   tbody.innerHTML = '';

@@ -3,7 +3,7 @@
   "name": "Steamprice",
   "version": "1.0.0",
   "description": "Skinpock inventory viewer with price history",
-  "permissions": ["storage", "unlimitedStorage", "cookies", "tabs", "scripting", "alarms"],
+  "permissions": ["storage", "unlimitedStorage", "cookies", "tabs", "alarms", "offscreen"],
   "host_permissions": [
     "https://www.skinpock.com/*",
     "https://steamcommunity.com/*"

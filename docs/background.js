@@ -53,6 +53,12 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
+async function recordTotal(items) {
+  const totalSteam  = items.reduce((s, i) => s + (i.priceSteam  ?? 0) * (i.count ?? 1), 0) || null;
+  const totalMarket = items.reduce((s, i) => s + (i.priceMarket ?? 0) * (i.count ?? 1), 0) || null;
+  await recordPrices([{ name: '__total__', priceSteam: totalSteam, priceMarket: totalMarket }]);
+}
+
 async function recordPrices(items) {
   const date = today();
   const keys = items.map(i => `ph:${i.name}`);
@@ -134,78 +140,43 @@ async function steamLogin() {
   return steamId;
 }
 
-// --- Steam inventory ---
+// --- Steam inventory via offscreen document ---
+
+const OFFSCREEN_URL = chrome.runtime.getURL('offscreen.html');
+
+async function withOffscreen(fn) {
+  const existing = await chrome.offscreen.hasDocument();
+  if (!existing) {
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      reasons: ['DOM_SCRAPING'],
+      justification: 'Fetch Steam inventory with session cookies',
+    });
+  }
+  try {
+    return await fn();
+  } finally {
+    await chrome.offscreen.closeDocument().catch(() => {});
+  }
+}
 
 async function steamInventory(steamId) {
-  const tab = await chrome.tabs.create({
-    url: `https://steamcommunity.com/profiles/${steamId}/inventory/`,
-    active: false,
-  });
+  const response = await withOffscreen(() =>
+    chrome.runtime.sendMessage({ action: 'steamInventoryFetch', steamId })
+  );
 
-  try {
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Tab load timeout')), 20_000);
-      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-        if (tabId !== tab.id || info.status !== 'complete') return;
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      });
-    });
+  if (response?.error) throw new Error(response.error);
+  const raw = response?.data;
+  if (!raw?.descriptions) throw new Error('Steam inventory is private or empty');
 
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: async (sid) => {
-        try {
-          const allDescriptions = [];
-          const allAssets = [];
-          let lastAssetId = null;
-
-          while (true) {
-            const url = new URL(`https://steamcommunity.com/inventory/${sid}/730/2`);
-            url.searchParams.set('l', 'english');
-            url.searchParams.set('count', '2000');
-            if (lastAssetId) url.searchParams.set('start_assetid', lastAssetId);
-
-            const res = await fetch(url.toString(), { credentials: 'include' });
-            const body = await res.text().catch(() => '');
-            if (!res.ok) return { error: `Steam ${res.status}: ${body.slice(0, 200)}` };
-
-            const page = JSON.parse(body);
-            if (!page?.assets) return { error: 'Empty or private inventory' };
-
-            allAssets.push(...page.assets);
-            for (const d of (page.descriptions ?? [])) {
-              if (!allDescriptions.some(e => e.classid === d.classid)) allDescriptions.push(d);
-            }
-            if (!page.more_items || !page.last_assetid) break;
-            lastAssetId = page.last_assetid;
-            await new Promise(r => setTimeout(r, 1000));
-          }
-
-          return { data: { descriptions: allDescriptions, assets: allAssets } };
-        } catch (e) {
-          return { error: e.message };
-        }
-      },
-      args: [steamId],
-    });
-
-    if (result.result.error) throw new Error(result.result.error);
-    const raw = result.result.data;
-    if (!raw?.descriptions) throw new Error('Steam inventory is private or empty');
-
-    return raw.descriptions.map(item => ({
-      markethashname: item.market_hash_name,
-      tradable:       item.tradable,
-      wear:    (item.tags ?? []).find(t => t.category === 'Exterior')?.localized_tag_name ?? null,
-      rarity:  (item.tags ?? []).find(t => t.category === 'Rarity')?.localized_tag_name ?? null,
-      type:    (item.tags ?? []).find(t => t.category === 'Type')?.localized_tag_name ?? null,
-      count:   raw.assets.filter(a => a.classid === item.classid).length,
-    }));
-  } finally {
-    chrome.tabs.remove(tab.id).catch(() => {});
-  }
+  return raw.descriptions.map(item => ({
+    markethashname: item.market_hash_name,
+    tradable:       item.tradable,
+    wear:    (item.tags ?? []).find(t => t.category === 'Exterior')?.localized_tag_name ?? null,
+    rarity:  (item.tags ?? []).find(t => t.category === 'Rarity')?.localized_tag_name ?? null,
+    type:    (item.tags ?? []).find(t => t.category === 'Type')?.localized_tag_name ?? null,
+    count:   raw.assets.filter(a => a.classid === item.classid).length,
+  }));
 }
 
 // --- Daily price refresh ---
@@ -230,16 +201,40 @@ async function dailyRefresh() {
     }));
 
     await recordPrices(toRecord);
-    await chrome.storage.local.set({ lastRefresh: today() });
+
+    // Record total using counts from the existing cache
+    const { inventoryCache } = await chrome.storage.local.get('inventoryCache');
+    if (inventoryCache?.items?.length) {
+      const priceMap = new Map(toRecord.map(i => [i.name, i]));
+      const updatedItems = inventoryCache.items.map(item => {
+        const p = priceMap.get(item.name);
+        return p ? { ...item, priceSteam: p.priceSteam, priceMarket: p.priceMarket } : item;
+      });
+      await Promise.all([
+        recordTotal(updatedItems),
+        chrome.storage.local.set({
+          inventoryCache: { items: updatedItems, cachedAt: today() },
+          lastRefresh: today(),
+        }),
+      ]);
+    } else {
+      await chrome.storage.local.set({ lastRefresh: today() });
+    }
   } catch (e) {
     console.error('Daily refresh failed:', e.message);
   }
 }
 
-// Schedule daily alarm
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create('dailyRefresh', { periodInMinutes: 1440 });
-});
+// Schedule daily alarm — recreate on install and on every service worker startup
+// (MV3 service workers are terminated and restarted regularly; alarms survive but
+// must be recreated here in case the extension was force-updated or reinstalled)
+async function ensureAlarm() {
+  const existing = await chrome.alarms.get('dailyRefresh');
+  if (!existing) chrome.alarms.create('dailyRefresh', { periodInMinutes: 1440 });
+}
+
+chrome.runtime.onInstalled.addListener(ensureAlarm);
+chrome.runtime.onStartup.addListener(ensureAlarm);
 
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'dailyRefresh') dailyRefresh();
@@ -316,6 +311,7 @@ const HANDLERS = {
       recordPrices(result.map(i => ({
         name: i.name, priceSteam: i.priceSteam, priceMarket: i.priceMarket,
       }))),
+      recordTotal(result),
       chrome.storage.local.set({ inventoryCache: { items: result, cachedAt: today() } }),
     ]);
 

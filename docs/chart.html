@@ -13,12 +13,33 @@
     .legend span { display: flex; align-items: center; gap: 0.4rem; }
     .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     #no-data { color: #888; margin-top: 2rem; }
+    .chart-wrap { position: relative; }
+    #overlay { position: absolute; inset: 0; width: 100%; pointer-events: none; }
+    #tooltip {
+      position: fixed;
+      background: #0d1117;
+      border: 1px solid #2a3a5e;
+      border-radius: 6px;
+      padding: 0.45rem 0.7rem;
+      font-size: 0.75rem;
+      pointer-events: none;
+      z-index: 10;
+      line-height: 1.7;
+      white-space: nowrap;
+    }
+    .tt-date   { color: #888; }
+    .tt-steam  { color: #00d4ff; }
+    .tt-market { color: #f4a261; }
   </style>
 </head>
 <body>
   <h2 id="title">—</h2>
   <p id="subtitle"></p>
-  <canvas id="chart" height="300"></canvas>
+  <div class="chart-wrap">
+    <canvas id="chart" height="300"></canvas>
+    <canvas id="overlay" height="300"></canvas>
+  </div>
+  <div id="tooltip" hidden></div>
   <div class="legend">
     <span><i class="dot" style="background:#00d4ff"></i> Steam</span>
     <span><i class="dot" style="background:#f4a261"></i> Markets</span>
