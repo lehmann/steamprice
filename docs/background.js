@@ -1,4 +1,4 @@
-// --- Skinpock ---
+// --- Skinpock (www — HMAC, for secondary endpoints like currency) ---
 
 const SKINPOCK_KEY = 'sP_hM4c_8xKq2VnL7pRj9TwYf5mDc3Zb6gNu1XeA0sHi';
 const SKINPOCK_BASE = 'https://www.skinpock.com';
@@ -33,6 +33,28 @@ async function skinpockFetch(path, params = {}) {
   });
   if (!res.ok) throw new Error(`Skinpock ${res.status}: ${await res.text()}`);
   return res.json();
+}
+
+// --- Skinpock API v2 (api.skinpock.com — no auth, inventory + prices) ---
+
+const MARKETS = 'tradeit,skinflow,dmarket,buff,youpin,skinport,skinbaron,skinland,haloskins,csfloat';
+
+async function skinpockInventory(steamId) {
+  const params = new URLSearchParams({
+    game: 'cs2',
+    refresh: '0',
+    view: 'inventory-page',
+    markets: MARKETS,
+  });
+  const url = `https://api.skinpock.com/api/v2/inventories/${encodeURIComponent(steamId)}?${params}`;
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json' },
+    credentials: 'omit',
+  });
+  if (!res.ok) throw new Error(`Skinpock ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  if (!Array.isArray(data?.items)) throw new Error('Unexpected Skinpock response');
+  return data.items;
 }
 
 // --- History (inline — service workers cannot import scripts) ---
@@ -89,7 +111,7 @@ async function recordPrices(items) {
   await chrome.storage.local.set(updates);
 }
 
-// --- Steam session via cookies ---
+// --- Steam login ---
 
 function steamIdFromCookie(cookieValue) {
   const decoded = decodeURIComponent(cookieValue);
@@ -140,45 +162,6 @@ async function steamLogin() {
   return steamId;
 }
 
-// --- Steam inventory via offscreen document ---
-
-const OFFSCREEN_URL = chrome.runtime.getURL('offscreen.html');
-
-async function withOffscreen(fn) {
-  const existing = await chrome.offscreen.hasDocument();
-  if (!existing) {
-    await chrome.offscreen.createDocument({
-      url: OFFSCREEN_URL,
-      reasons: ['DOM_SCRAPING'],
-      justification: 'Fetch Steam inventory with session cookies',
-    });
-  }
-  try {
-    return await fn();
-  } finally {
-    await chrome.offscreen.closeDocument().catch(() => {});
-  }
-}
-
-async function steamInventory(steamId) {
-  const response = await withOffscreen(() =>
-    chrome.runtime.sendMessage({ action: 'steamInventoryFetch', steamId })
-  );
-
-  if (response?.error) throw new Error(response.error);
-  const raw = response?.data;
-  if (!raw?.descriptions) throw new Error('Steam inventory is private or empty');
-
-  return raw.descriptions.map(item => ({
-    markethashname: item.market_hash_name,
-    tradable:       item.tradable,
-    wear:    (item.tags ?? []).find(t => t.category === 'Exterior')?.localized_tag_name ?? null,
-    rarity:  (item.tags ?? []).find(t => t.category === 'Rarity')?.localized_tag_name ?? null,
-    type:    (item.tags ?? []).find(t => t.category === 'Type')?.localized_tag_name ?? null,
-    count:   raw.assets.filter(a => a.classid === item.classid).length,
-  }));
-}
-
 // --- Daily price refresh ---
 
 async function dailyRefresh() {
@@ -186,13 +169,7 @@ async function dailyRefresh() {
   if (!steamId) return;
 
   try {
-    const items = await skinpockFetch('/api/inventory', {
-      steam_id: steamId,
-      sort: 'price_max',
-      game: 'cs2',
-      language: 'english',
-      markets: 'tradeit,skinflow,dmarket,buff,youpin,skinport,skinbaron,skinland,haloskins,csfloat',
-    });
+    const items = await skinpockInventory(steamId);
 
     const toRecord = items.map(i => ({
       name:        i.markethashname,
@@ -260,51 +237,23 @@ const HANDLERS = {
   },
 
   inventoryHybrid: async ({ steamId }) => {
-    const [steamItems, skinpockItems] = await Promise.all([
-      steamInventory(steamId),
-      skinpockFetch('/api/inventory', {
-        steam_id: steamId,
-        sort: 'price_max',
-        game: 'cs2',
-        language: 'english',
-        markets: 'tradeit,skinflow,dmarket,buff,youpin,skinport,skinbaron,skinland,haloskins,csfloat',
-      }),
-    ]);
+    const rawItems = await skinpockInventory(steamId);
 
-    const spMap = new Map();
-    for (const sp of skinpockItems) {
-      if (!spMap.has(sp.markethashname)) {
-        spMap.set(sp.markethashname, {
-          priceSteam:  parseFloat(sp.pricelatest) || null,
-          priceMarket: parseFloat(sp.pricemix)    || null,
-        });
-      }
-    }
-
-    const map = new Map();
-    for (const item of steamItems) {
-      const name = item.markethashname;
-      if (!map.has(name)) {
-        const sp = spMap.get(name) ?? {};
-        map.set(name, {
-          name,
-          wear:        item.wear,
-          rarity:      item.rarity,
-          type:        item.type,
-          tradable:    item.tradable,
-          count:       0,
-          priceSteam:  sp.priceSteam  ?? null,
-          priceMarket: sp.priceMarket ?? null,
-        });
-      }
-      map.get(name).count += item.count;
-    }
-
-    const result = [...map.values()].sort((a, b) => {
-      const av = (a.priceSteam ?? a.priceMarket ?? 0) * a.count;
-      const bv = (b.priceSteam ?? b.priceMarket ?? 0) * b.count;
-      return bv - av;
-    });
+    const result = rawItems
+      .map(i => ({
+        name:        i.markethashname,
+        rarity:      i.rarity   ?? null,
+        type:        i.quality  ?? null,
+        tradable:    null,
+        count:       parseInt(i.count, 10) || 1,
+        priceSteam:  parseFloat(i.pricelatest) || null,
+        priceMarket: parseFloat(i.pricemix)    || null,
+      }))
+      .sort((a, b) => {
+        const av = (a.priceSteam ?? a.priceMarket ?? 0) * a.count;
+        const bv = (b.priceSteam ?? b.priceMarket ?? 0) * b.count;
+        return bv - av;
+      });
 
     // Persist today's prices and cache the full result for the popup
     await Promise.all([
