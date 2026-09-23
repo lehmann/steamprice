@@ -46,9 +46,13 @@ async function skinpockInventory(steamId) {
     view: 'inventory-page',
     markets: MARKETS,
   });
-  const url = `https://api.skinpock.com/api/v2/inventories/${encodeURIComponent(steamId)}?${params}`;
+  const path = `/api/v2/inventories/${encodeURIComponent(steamId)}`;
+  const url = `https://api.skinpock.com${path}?${params}`;
   const res = await fetch(url, {
-    headers: { 'Accept': 'application/json' },
+    headers: {
+      'Accept': 'application/json',
+      ...(await hmacHeaders(path)),
+    },
     credentials: 'omit',
   });
   if (!res.ok) throw new Error(`Skinpock ${res.status}: ${await res.text()}`);
