@@ -35,9 +35,30 @@ async function skinpockFetch(path, params = {}) {
   return res.json();
 }
 
-// --- Skinpock API v2 (api.skinpock.com — no auth, inventory + prices) ---
+// --- Skinpock API v2 (api.skinpock.com — inventory + prices) ---
+// api.skinpock.com requires browser verification (403 browser_proof_required),
+// which only the site's own page scripts satisfy. The request therefore runs
+// inside a real skinpock.com tab, where the page's patched fetch adds the proof.
 
 const MARKETS = 'tradeit,skinflow,dmarket,buff,youpin,skinport,skinbaron,skinland,haloskins,csfloat';
+
+// Returns { tab, created }. `created` tells the caller it owns the tab and may close it.
+async function getSkinpockTab() {
+  const [existing] = await chrome.tabs.query({ url: 'https://www.skinpock.com/*' });
+  const created = !existing;
+  const tab = existing ?? await chrome.tabs.create({ url: 'https://www.skinpock.com/', active: false });
+  if (tab.status === 'complete') return { tab, created };
+
+  await new Promise(resolve => {
+    function listener(tabId, info) {
+      if (tabId !== tab.id || info.status !== 'complete') return;
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+  return { tab, created };
+}
 
 async function skinpockInventory(steamId) {
   const params = new URLSearchParams({
@@ -48,15 +69,29 @@ async function skinpockInventory(steamId) {
   });
   const path = `/api/v2/inventories/${encodeURIComponent(steamId)}`;
   const url = `https://api.skinpock.com${path}?${params}`;
-  const res = await fetch(url, {
-    headers: {
-      'Accept': 'application/json',
-      ...(await hmacHeaders(path)),
+  const { tab, created } = await getSkinpockTab();
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    world: 'MAIN',
+    func: async url => {
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        credentials: 'omit',
+      });
+      return { status: res.status, body: await res.text() };
     },
-    credentials: 'omit',
+    args: [url],
   });
-  if (!res.ok) throw new Error(`Skinpock ${res.status}: ${await res.text()}`);
-  const data = await res.json();
+
+  if (result.body.includes('browser_proof_required')) {
+    await chrome.tabs.update(tab.id, { active: true });
+    throw new Error('Skinpock exige verificação de navegador: conclua na aba da Skinpock e tente de novo');
+  }
+  // Close only a tab we opened; leave the user's own Skinpock tab alone
+  if (created) await chrome.tabs.remove(tab.id).catch(() => {});
+  if (result.status !== 200) throw new Error(`Skinpock ${result.status}: ${result.body}`);
+  const data = JSON.parse(result.body);
   if (!Array.isArray(data?.items)) throw new Error('Unexpected Skinpock response');
   return data.items;
 }
